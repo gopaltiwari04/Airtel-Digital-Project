@@ -259,7 +259,158 @@ export function recalculateQuote(
   };
 }
 
-export function processAdvisorTurn(message: string, history: any[], slots: Record<string, any>) {
+function normalizeVertical(v?: string): string {
+  if (!v) return "micro";
+  const s = v.toLowerCase();
+  if (["retail", "shop", "store", "kirana", "sweet", "bakery", "salon", "pharmacy", "micro"].some((k) => s.includes(k))) return "micro";
+  if (["clinic", "doctor", "health", "physio", "hospital", "ca", "law", "office", "consult", "coaching", "prof"].some((k) => s.includes(k))) return "prof";
+  if (["restaurant", "chain", "multi", "food", "branch"].some((k) => s.includes(k))) return "multi";
+  if (["factory", "mfg", "manufactur", "plant", "industrial", "parts"].some((k) => s.includes(k))) return "mfg";
+  return "micro";
+}
+
+async function callGeminiAdvisor(message: string, history: any[], slots: Record<string, any>) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  const systemInstruction = `You are the official Conversational Advisor for Airtel Business SYNC (Bharti Airtel Enterprise & MSME Solutions).
+You talk strictly, respectfully, and exclusively as Airtel Business SYNC. Never break character. Never mention you are Gemini, Google, an AI model, or an LLM.
+
+Your objective:
+1. Conduct consultative enterprise discovery for Indian MSMEs looking for unified connectivity and digital solutions:
+   - Airtel Biz Fibre Broadband (100 Mbps, 300 Mbps, 1 Gbps) with dedicated enterprise throughput
+   - Airtel Business Postpaid SIMs (unlimited calling, shared corporate data pool)
+   - Static IP, Cloud Telephony / SIP, Cloud Backup (1 TB), Endpoint Security, and WhatsApp Business API.
+2. Converse naturally in the user's language (English, Hindi, or Hinglish). Keep responses warm, professional, and concise.
+3. Extract and track the key MSME slots:
+   - vertical: "micro" (Retail/Kirana/Store/Salon/Pharmacy), "prof" (Clinic/Doctor/Law/CA Office/Consultant), "multi" (Restaurant chain/Multi-branch retail), or "mfg" (Manufacturing/Industrial Factory).
+   - headcount: number of employees/staff members needing SIMs or connectivity.
+   - locations: number of branches or physical locations (e.g. 1, 2, 3).
+   - priorities: array of key requirements (e.g. "broadband", "business SIMs", "static IP", "cloud backup", "WhatsApp API", "cybersecurity").
+   - budget: optional monthly budget in INR.
+4. Answer any questions about Airtel enterprise services accurately:
+   - 99.5% uptime SLA (99.9% for leased lines), 4-hour MTTR guarantee.
+   - Single consolidated monthly tax invoice (SAC 998422) for all services, broadband, and SIMs.
+   - ₹0 one-time setup fee on all 24-month or 36-month contracts.
+   - Direct support through 24x7 Enterprise Helpdesk (1800-103-SYNC).
+   - Number porting (MNP) to Airtel Business postpaid without downtime.
+5. Return strictly a JSON object with:
+{
+  "reply": "Your natural, polite response as Airtel Business SYNC in the user's language.",
+  "slots": {
+    "vertical": "micro" | "prof" | "multi" | "mfg" | null,
+    "headcount": number | null,
+    "locations": number | null,
+    "priorities": string[] | null,
+    "budget": number | null
+  },
+  "is_complete": boolean (true if vertical, headcount, and locations are all captured, or if the user asked to see a quote/recommendation)
+}`;
+
+  const contents: any[] = [];
+  for (const m of history || []) {
+    if (m.content) {
+      contents.push({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }]
+      });
+    }
+  }
+  contents.push({
+    role: "user",
+    parts: [{ text: message }]
+  });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents,
+      systemInstruction: { parts: [{ text: systemInstruction }] },
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.2
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error("Gemini API error status:", response.status, errText);
+    return null;
+  }
+
+  const data = await response.json();
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) return null;
+
+  try {
+    return JSON.parse(rawText);
+  } catch (err) {
+    console.error("Failed to parse Gemini response as JSON:", rawText, err);
+    return null;
+  }
+}
+
+export async function processAdvisorTurn(message: string, history: any[], slots: Record<string, any>) {
+  // 1. First attempt with Gemini 2.5 Flash as Airtel Business SYNC
+  try {
+    const geminiRes = await callGeminiAdvisor(message, history, slots);
+    if (geminiRes && geminiRes.reply) {
+      const mergedSlots = { ...slots };
+      if (geminiRes.slots) {
+        if (geminiRes.slots.vertical) mergedSlots.vertical = normalizeVertical(geminiRes.slots.vertical);
+        if (geminiRes.slots.headcount) mergedSlots.headcount = Number(geminiRes.slots.headcount);
+        if (geminiRes.slots.locations) mergedSlots.locations = Number(geminiRes.slots.locations);
+        if (geminiRes.slots.priorities && Array.isArray(geminiRes.slots.priorities)) {
+          mergedSlots.priorities = Array.from(new Set([...(slots.priorities || []), ...geminiRes.slots.priorities]));
+        }
+        if (geminiRes.slots.budget) mergedSlots.budget = Number(geminiRes.slots.budget);
+      }
+
+      // Also regex check in case user explicitly mentioned numbers in their message
+      const t = (message || "").toLowerCase();
+      if (!mergedSlots.headcount) {
+        const mHc = t.match(/(\d+)\s*(people|employees|members|staff|team|log|persons)/);
+        if (mHc) mergedSlots.headcount = parseInt(mHc[1], 10);
+      }
+      if (!mergedSlots.locations) {
+        const mLoc = t.match(/(\d+)\s*(branch(?:es)?|location(?:s)?|site(?:s)?|shop(?:s)?|store(?:s)?|outlet(?:s)?|jagah)/i);
+        if (mLoc) mergedSlots.locations = parseInt(mLoc[1], 10);
+        else if (["single", "ek hi", "one site", "one shop", "1 site", "1 location", "1 shop"].some((w) => t.includes(w))) {
+          mergedSlots.locations = 1;
+        }
+      }
+
+      const isComplete = Boolean(
+        geminiRes.is_complete ||
+        (mergedSlots.vertical && mergedSlots.headcount && mergedSlots.locations)
+      );
+
+      let quotePayload = null;
+      if (isComplete) {
+        quotePayload = recommendBundle(
+          mergedSlots.vertical || "micro",
+          mergedSlots.headcount || 5,
+          mergedSlots.locations || 1,
+          mergedSlots.priorities || [],
+          mergedSlots.budget
+        );
+      }
+
+      return {
+        reply: geminiRes.reply,
+        slots: mergedSlots,
+        is_complete: isComplete,
+        quote_payload: quotePayload,
+      };
+    }
+  } catch (err) {
+    console.error("Gemini Advisor call failed, falling back to deterministic extractor:", err);
+  }
+
+  // 2. Deterministic Fallback if Gemini API is unreachable
   const t = (message || "").toLowerCase();
   const updatedSlots = { ...slots };
 

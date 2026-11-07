@@ -12,19 +12,74 @@ import {
   PhoneCall,
   RefreshCw,
   ArrowRight,
-  Zap,
   Building2,
   Users,
   MapPin,
   Check,
-  HelpCircle,
+  RotateCcw,
   ChevronRight
 } from "lucide-react";
-import { sendAdvisorChat, calculateQuote, ChatMessage } from "../lib/api";
+import { sendAdvisorChat, ChatMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 interface Step1DiscoveryProps {
   onQuoteGenerated: (quoteData: any, slots: any) => void;
+}
+
+// Lightweight Markdown renderer for bolding, bullet points, and numbered lists
+function FormattedMessage({ text }: { text: string }) {
+  const paragraphs = text.split("\n\n");
+
+  const formatLine = (line: string) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={i} className="font-extrabold text-inherit">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      return part;
+    });
+  };
+
+  return (
+    <div className="space-y-1.5 text-xs leading-relaxed">
+      {paragraphs.map((p, pIdx) => {
+        const lines = p.split("\n");
+        return (
+          <div key={pIdx}>
+            {lines.map((line, lIdx) => {
+              const trimmed = line.trim();
+              if (trimmed.startsWith("- ") || trimmed.startsWith("• ") || trimmed.startsWith("* ")) {
+                return (
+                  <div key={lIdx} className="flex items-start gap-1.5 ml-1 my-0.5">
+                    <span className="text-red-500 font-bold">•</span>
+                    <span>{formatLine(trimmed.slice(2))}</span>
+                  </div>
+                );
+              }
+              const numbered = trimmed.match(/^(\d+)\.\s+(.*)/);
+              if (numbered) {
+                return (
+                  <div key={lIdx} className="flex items-start gap-1.5 ml-1 my-0.5">
+                    <span className="font-bold text-red-600">{numbered[1]}.</span>
+                    <span>{formatLine(numbered[2])}</span>
+                  </div>
+                );
+              }
+              return (
+                <p key={lIdx} className={lIdx > 0 ? "mt-1" : ""}>
+                  {formatLine(line)}
+                </p>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps) {
@@ -43,13 +98,20 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
   const [isListening, setIsListening] = useState<boolean>(false);
   const [speechLang, setSpeechLang] = useState<"hi-IN" | "en-IN">("en-IN");
   const [generatedQuote, setGeneratedQuote] = useState<any | null>(null);
+  const [currentTime, setCurrentTime] = useState<string>("12:00 PM");
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const d = new Date();
+    setCurrentTime(d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, loading]);
 
   // Web Speech Recognition setup
   useEffect(() => {
@@ -65,6 +127,10 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
           const transcript = event.results[0][0].transcript;
           setInput(transcript);
           setIsListening(false);
+          // Auto-send voice input for seamless hands-free interaction
+          if (transcript.trim()) {
+            handleSend(transcript.trim());
+          }
         };
 
         recognition.onerror = () => {
@@ -78,11 +144,11 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
         recognitionRef.current = recognition;
       }
     }
-  }, [speechLang]);
+  }, [speechLang, messages, slots]);
 
   const toggleListening = () => {
     if (!recognitionRef.current) {
-      alert("Speech recognition is not supported in this browser. Please use Chrome/Edge.");
+      alert("Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
       return;
     }
     if (isListening) {
@@ -129,15 +195,27 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
         ...newHistory,
         {
           role: "assistant",
-          content: "Sorry, I had trouble connecting to the advisory engine. Please check API server."
+          content: "Sorry, I had trouble connecting to Airtel Business SYNC engine. Please verify the API server or connection."
         }
       ]);
     } finally {
       setLoading(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
 
-  // Instant 1-click bypass to configure bundle directly
+  const handleResetChat = () => {
+    setMessages([
+      {
+        role: "assistant",
+        content:
+          "Namaste! Welcome to Airtel Business SYNC. I am your automated enterprise advisor. Tell me about your business (what type of business you run, your team size, and branch count) or choose one of the quick scenarios above, and I will configure a tailored, single-bill bundle for you!"
+      }
+    ]);
+    setSlots({});
+    setGeneratedQuote(null);
+  };
+
   const handleInstantRecommend = async (customSlots?: { vertical: string; headcount: number; locations: number }) => {
     const targetSlots = customSlots || { vertical: "prof", headcount: 8, locations: 1 };
     setLoading(true);
@@ -188,6 +266,39 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
 
   const capturedSlotsCount = ["vertical", "headcount", "locations"].filter((k) => slots[k] !== undefined).length;
 
+  // Suggestion chips based on unfulfilled slots
+  const getContextChips = () => {
+    if (!slots.vertical) {
+      return [
+        { label: "🩺 Clinic / Hospital", text: "We run a healthcare clinic with consultation rooms." },
+        { label: "🏪 Retail / Kirana Store", text: "We run a retail store with billing counters." },
+        { label: "🍽️ Restaurant / Cafe", text: "We run a multi-outlet food and restaurant business." },
+        { label: "🏭 Manufacturing / Factory", text: "We operate an industrial manufacturing workshop." },
+        { label: "💼 Office / CA / Legal", text: "We run a professional corporate office." }
+      ];
+    }
+    if (!slots.headcount) {
+      return [
+        { label: "👥 5 Staff", text: "We have 5 team members needing connectivity." },
+        { label: "👥 8 Staff", text: "We have a team of 8 employees." },
+        { label: "👥 15 Staff", text: "We have 15 staff members across teams." },
+        { label: "👥 25+ Staff", text: "We have 25 or more workers on site." }
+      ];
+    }
+    if (!slots.locations) {
+      return [
+        { label: "📍 Single Location", text: "We operate from a single location." },
+        { label: "📍 2-3 Outlets / Sites", text: "We have 3 branches across the city." },
+        { label: "📍 5+ Multi-City Branches", text: "We have multiple branches across different cities." }
+      ];
+    }
+    return [
+      { label: "⚡ Generate My Quote", text: "Please recommend the best bundle for our setup." },
+      { label: "🛡️ Add Cybersecurity & Static IP", text: "We also need dedicated static IP and endpoint cybersecurity." },
+      { label: "📱 Number Porting (MNP)", text: "Can we port our existing Jio / Vi mobile numbers to Airtel Business?" }
+    ];
+  };
+
   return (
     <div className="space-y-6">
       
@@ -199,7 +310,7 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             <h2 className="text-lg font-extrabold text-slate-900">Needs Discovery &amp; Conversational Advisor</h2>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Slot-filling in English, Hindi, or Hinglish via WhatsApp simulator, web chat, or 1-click test profiles.
+            Powered by <strong>Airtel Business SYNC</strong> • Natural Hindi, English, and Hinglish dialogue with zero price hallucination.
           </p>
         </div>
 
@@ -237,6 +348,15 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
               {speechLang === "en-IN" ? "English (India)" : "Hindi (India)"}
             </button>
           </div>
+
+          {/* Reset Chat Button */}
+          <button
+            onClick={handleResetChat}
+            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-all"
+            title="Restart conversation"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -330,7 +450,7 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
         </div>
       </div>
 
-      {/* Prominent 1-Click Fast-Track Presets Bar (Positioned ABOVE the chat so user is never stuck) */}
+      {/* Prominent 1-Click Fast-Track Presets Bar */}
       <div className="bg-gradient-to-r from-red-50 via-slate-50 to-amber-50 p-4 rounded-2xl border border-red-100 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
           <div>
@@ -418,7 +538,7 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
           {/* WhatsApp Header */}
           <div className="bg-[#075e54] text-white px-4 py-3 flex items-center justify-between shadow">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center font-black text-[#075e54] text-lg shadow-sm">
+              <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center font-black text-[#075e54] text-lg shadow-sm border border-emerald-300">
                 A
               </div>
               <div>
@@ -428,17 +548,25 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
                     OFFICIAL
                   </span>
                 </div>
-                <p className="text-[11px] text-emerald-200">Verified Business Account • Online</p>
+                <p className="text-[11px] text-emerald-200">Verified Bharti Airtel Enterprise Account • Online</p>
               </div>
             </div>
 
             <div className="flex items-center space-x-3 text-emerald-100">
-              <PhoneCall className="w-5 h-5 cursor-pointer hover:text-white" />
+              <button
+                onClick={handleResetChat}
+                className="hover:text-white text-xs flex items-center gap-1 bg-[#064e46] px-2 py-1 rounded-lg"
+                title="Reset Chat"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset</span>
+              </button>
+              <PhoneCall className="w-4 h-4 cursor-pointer hover:text-white" />
             </div>
           </div>
 
           {/* Encryption Notice */}
-          <div className="p-3 text-center">
+          <div className="p-2.5 text-center bg-[#e5ddd5]">
             <span className="bg-[#fcf8e3] text-[#8a6d3b] text-[10px] px-3 py-1 rounded-lg inline-flex items-center space-x-1 shadow-sm border border-[#faebcc]">
               <span>🔒 Messages are end-to-end encrypted under DPDP Act, 2023.</span>
             </span>
@@ -458,33 +586,64 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
                       : "bg-white text-slate-900 rounded-tl-none border border-slate-100"
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{m.content}</p>
-                  
                   {m.role === "assistant" && (
-                    <div className="flex items-center justify-between mt-2 pt-1 border-t border-slate-100 text-[10px] text-slate-400">
-                      <span>SYNC Advisor</span>
-                      <button
-                        onClick={() => speakText(m.content)}
-                        className="hover:text-emerald-700 flex items-center space-x-1"
-                        title="Listen with Text-to-Speech"
-                      >
-                        <Volume2 className="w-3.5 h-3.5" />
-                        <span>Listen</span>
-                      </button>
+                    <div className="text-[10px] font-extrabold text-[#075e54] mb-1 flex items-center gap-1">
+                      <span>Airtel Business SYNC</span>
+                      <span className="text-[9px] text-[#25d366] font-bold">✓</span>
                     </div>
                   )}
+
+                  <FormattedMessage text={m.content} />
+                  
+                  <div className="flex items-center justify-between mt-2 pt-1 border-t border-slate-100/70 text-[10px] text-slate-400">
+                    <span className="text-[9px]">{currentTime}</span>
+                    <div className="flex items-center space-x-2">
+                      {m.role === "assistant" ? (
+                        <button
+                          onClick={() => speakText(m.content)}
+                          className="hover:text-emerald-700 flex items-center space-x-1 font-semibold"
+                          title="Listen with Text-to-Speech"
+                        >
+                          <Volume2 className="w-3 h-3" />
+                          <span>Listen</span>
+                        </button>
+                      ) : (
+                        <span className="text-[#34b7f1] font-bold text-[11px]" title="Delivered & Read">✓✓</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
+
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-white rounded-2xl px-4 py-2 text-xs text-slate-500 shadow-sm flex items-center space-x-2">
+                <div className="bg-white rounded-2xl px-4 py-2.5 text-xs text-slate-600 shadow-sm flex items-center space-x-2 border border-slate-100">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                  <span>Airtel Advisor is typing...</span>
+                  <span className="font-medium text-slate-700">Airtel Business SYNC is replying...</span>
                 </div>
               </div>
             )}
             <div ref={messagesEndRef} />
+          </div>
+
+          {/* Interactive Suggestion Chips inside Chat */}
+          <div className="px-4 py-2 bg-[#f0f0f0]/80 border-t border-slate-200">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+              Quick Reply Suggestions:
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {getContextChips().map((chip, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSend(chip.text)}
+                  disabled={loading}
+                  className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:border-emerald-500 border border-slate-200 text-slate-700 text-[11px] rounded-lg transition-all shadow-xs font-medium disabled:opacity-50"
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Live Voice Waveform Banner */}
@@ -519,11 +678,17 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             </button>
 
             <input
+              ref={inputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder={isListening ? "Listening... Speak in Hindi or English" : "Type business details or choose a preset above..."}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={isListening ? "Listening... Speak now" : "Message Airtel Business SYNC (or use mic)..."}
               className="flex-1 bg-white text-xs px-4 py-2.5 rounded-full border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
             />
 
@@ -544,11 +709,20 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             <div className="flex items-center space-x-3">
               <Sparkles className="w-5 h-5 text-yellow-300" />
               <div>
-                <h3 className="font-bold text-sm">Airtel SYNC GenAI Bundle Advisor</h3>
-                <p className="text-[11px] text-red-100">Slot-Filling in English, Hindi, &amp; Hinglish</p>
+                <h3 className="font-bold text-sm">Airtel Business SYNC GenAI Advisor</h3>
+                <p className="text-[11px] text-red-100">Official Bharti Airtel Enterprise MSME Solution</p>
               </div>
             </div>
-            <span className="px-2 py-0.5 text-xs bg-white/20 rounded-full font-medium">Turn-based discovery</span>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleResetChat}
+                className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-medium flex items-center gap-1 text-white"
+                title="Restart Chat"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset</span>
+              </button>
+            </div>
           </div>
 
           <div className="p-6 space-y-4 min-h-[360px] max-h-[460px] overflow-y-auto bg-slate-50">
@@ -564,7 +738,14 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
                       : "bg-white text-slate-900 rounded-tl-none border border-slate-200"
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{m.content}</p>
+                  {m.role === "assistant" && (
+                    <div className="text-[10px] font-extrabold text-red-700 mb-1 flex items-center gap-1">
+                      <span>Airtel Business SYNC</span>
+                    </div>
+                  )}
+
+                  <FormattedMessage text={m.content} />
+
                   {m.role === "assistant" && (
                     <div className="flex justify-end mt-2 pt-1 border-t border-slate-100">
                       <button
@@ -579,7 +760,35 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
                 </div>
               </div>
             ))}
+
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-white rounded-2xl p-4 text-xs text-slate-600 shadow-sm border border-slate-200 flex items-center space-x-2">
+                  <span className="w-2 h-2 rounded-full bg-red-600 animate-ping" />
+                  <span className="font-semibold text-slate-800">Airtel Business SYNC is analyzing...</span>
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
+          </div>
+
+          {/* Quick Reply Chips in Web View */}
+          <div className="px-6 py-2 bg-slate-100 border-t border-slate-200">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+              Suggested Answers:
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {getContextChips().map((chip, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSend(chip.text)}
+                  disabled={loading}
+                  className="px-2.5 py-1 bg-white hover:bg-red-50 hover:border-red-500 border border-slate-200 text-slate-700 text-xs rounded-lg transition-all shadow-xs font-medium disabled:opacity-50"
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Live Voice Waveform Banner */}
@@ -613,11 +822,17 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             </button>
 
             <input
+              ref={inputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Describe your business, headcount, branches, and priorities..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder="Ask Airtel Business SYNC anything or describe your business..."
               className="flex-1 px-4 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
             />
 
