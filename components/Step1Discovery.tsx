@@ -1,20 +1,40 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Send, Mic, MicOff, Volume2, Sparkles, CheckCircle2, MessageSquare, PhoneCall, RefreshCw, ArrowRight } from "lucide-react";
-import { sendAdvisorChat, ChatMessage } from "../lib/api";
+import {
+  Send,
+  Mic,
+  MicOff,
+  Volume2,
+  Sparkles,
+  CheckCircle2,
+  MessageSquare,
+  PhoneCall,
+  RefreshCw,
+  ArrowRight,
+  Zap,
+  Building2,
+  Users,
+  MapPin,
+  Check,
+  HelpCircle,
+  ChevronRight
+} from "lucide-react";
+import { sendAdvisorChat, calculateQuote, ChatMessage } from "../lib/api";
+import { useAuth } from "../lib/auth";
 
 interface Step1DiscoveryProps {
   onQuoteGenerated: (quoteData: any, slots: any) => void;
 }
 
 export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps) {
-  const [mode, setMode] = useState<"web" | "whatsapp">("whatsapp");
+  const { user } = useAuth();
+  const [mode, setMode] = useState<"whatsapp" | "web">("whatsapp");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
       content:
-        "Namaste! Welcome to Airtel Business SYNC. I am your automated enterprise advisor. Tell me about your business (what type of business you run, your team size, and branches) and I will configure a tailored, single-bill bundle for you!"
+        "Namaste! Welcome to Airtel Business SYNC. I am your automated enterprise advisor. Tell me about your business (what type of business you run, your team size, and branch count) or choose one of the quick scenarios above, and I will configure a tailored, single-bill bundle for you!"
     }
   ]);
   const [input, setInput] = useState<string>("");
@@ -117,36 +137,80 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
     }
   };
 
+  // Instant 1-click bypass to configure bundle directly
+  const handleInstantRecommend = async (customSlots?: { vertical: string; headcount: number; locations: number }) => {
+    const targetSlots = customSlots || { vertical: "prof", headcount: 8, locations: 1 };
+    setLoading(true);
+    try {
+      const res = await sendAdvisorChat(
+        `We are a ${targetSlots.vertical} enterprise with ${targetSlots.headcount} team members across ${targetSlots.locations} site(s). Configure bundle.`,
+        messages,
+        targetSlots
+      );
+      if (res.quote_payload) {
+        setSlots(res.slots);
+        setGeneratedQuote(res.quote_payload);
+        onQuoteGenerated(res.quote_payload, res.slots);
+      }
+    } catch (err) {
+      console.error("Instant recommend error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const quickPrompts = [
-    { label: "Kirana / Retail (5 Staff)", text: "I run a retail kirana store with 5 employees and 1 shop. We need fast broadband for UPI POS and business SIMs." },
-    { label: "Dental Clinic (8 Staff + Static IP)", text: "We operate a dental clinic with 8 staff members. We need reliable fiber, a static IP for patient records, and cloud backup." },
-    { label: "Restaurant Chain (3 Outlets)", text: "We have a 3-outlet restaurant chain with 15 staff. We need unified internet, CCTV security, and a single consolidated bill." },
-    { label: "Manufacturing Unit (25 Workers)", text: "We have an auto parts manufacturing factory with 25 workers. Need dedicated leased line internet, IoT tracking, and firewall security." }
+    {
+      icon: "🩺",
+      title: "Dental Clinic",
+      meta: "8 Staff • 1 Site",
+      text: "We operate a dental clinic with 8 staff members in 1 location. We need reliable fiber, a static IP for patient records, and cloud backup."
+    },
+    {
+      icon: "🏪",
+      title: "Kirana / Retail",
+      meta: "5 Staff • 1 Shop",
+      text: "I run a retail kirana store with 5 employees and 1 shop. We need fast broadband for UPI POS and business SIMs."
+    },
+    {
+      icon: "🍽️",
+      title: "Restaurant Chain",
+      meta: "15 Staff • 3 Sites",
+      text: "We have a 3-outlet restaurant chain with 15 staff. We need unified internet, CCTV security, and a single consolidated bill."
+    },
+    {
+      icon: "🏭",
+      title: "Auto Factory",
+      meta: "25 Staff • 1 Plant",
+      text: "We have an auto parts manufacturing factory with 25 workers. Need dedicated leased line internet, IoT tracking, and firewall security."
+    }
   ];
+
+  const capturedSlotsCount = ["vertical", "headcount", "locations"].filter((k) => slots[k] !== undefined).length;
 
   return (
     <div className="space-y-6">
       
       {/* Top Banner & Control Bar */}
-      <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
             <span className="px-2.5 py-0.5 text-xs font-bold bg-red-100 text-red-700 rounded-full">Step 1 of 4</span>
-            <h2 className="text-lg font-extrabold text-gray-900">Needs Discovery & Conversational Advisor</h2>
+            <h2 className="text-lg font-extrabold text-slate-900">Needs Discovery &amp; Conversational Advisor</h2>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
-            Captures business profile, headcount, locations, and priorities in English, Hindi, or Hinglish within 3 turns.
+          <p className="text-xs text-slate-500 mt-1">
+            Slot-filling in English, Hindi, or Hinglish via WhatsApp simulator, web chat, or 1-click test profiles.
           </p>
         </div>
 
         {/* View Mode & Voice Controls */}
         <div className="flex flex-wrap items-center gap-2">
           {/* WhatsApp vs Web View Switcher */}
-          <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
+          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button
               onClick={() => setMode("whatsapp")}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                mode === "whatsapp" ? "bg-emerald-600 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"
+                mode === "whatsapp" ? "bg-emerald-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
               }`}
             >
               <MessageSquare className="w-3.5 h-3.5" />
@@ -155,7 +219,7 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             <button
               onClick={() => setMode("web")}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                mode === "web" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                mode === "web" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
               }`}
             >
               <Sparkles className="w-3.5 h-3.5 text-red-600" />
@@ -164,11 +228,11 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
           </div>
 
           {/* Voice Language Selector */}
-          <div className="flex items-center bg-gray-100 px-2 py-1 rounded-xl text-xs space-x-1">
-            <span className="text-[11px] text-gray-500 font-medium">Voice:</span>
+          <div className="flex items-center bg-slate-100 px-2 py-1 rounded-xl text-xs space-x-1">
+            <span className="text-[11px] text-slate-500 font-medium">Voice:</span>
             <button
               onClick={() => setSpeechLang(speechLang === "en-IN" ? "hi-IN" : "en-IN")}
-              className="font-bold text-gray-800 underline hover:text-red-600"
+              className="font-bold text-slate-800 underline hover:text-red-600"
             >
               {speechLang === "en-IN" ? "English (India)" : "Hindi (India)"}
             </button>
@@ -176,46 +240,180 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
         </div>
       </div>
 
-      {/* Captured Slots Visualizer */}
+      {/* Captured Slots Visualizer - Non-stuck, informative telemetry */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
-          <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Vertical</span>
-          <p className="text-sm font-extrabold text-gray-900 capitalize mt-0.5">
-            {slots.vertical || <span className="text-gray-400 italic font-normal">Detecting...</span>}
-          </p>
-        </div>
-        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
-          <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Headcount</span>
-          <p className="text-sm font-extrabold text-gray-900 mt-0.5">
-            {slots.headcount ? `${slots.headcount} members` : <span className="text-gray-400 italic font-normal">Detecting...</span>}
-          </p>
-        </div>
-        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
-          <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Branches</span>
-          <p className="text-sm font-extrabold text-gray-900 mt-0.5">
-            {slots.locations ? `${slots.locations} site(s)` : <span className="text-gray-400 italic font-normal">Detecting...</span>}
-          </p>
-        </div>
-        <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
-          <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">Status</span>
-          <p className="text-sm font-extrabold flex items-center space-x-1.5 mt-0.5">
-            {generatedQuote ? (
-              <span className="text-emerald-600 flex items-center space-x-1">
-                <CheckCircle2 className="w-4 h-4" /> <span>Quote Ready!</span>
+        {/* VERTICAL */}
+        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1">
+              <Building2 className="w-3 h-3 text-slate-400" /> Vertical
+            </span>
+            {slots.vertical && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
+          </div>
+          <div className="mt-1">
+            {slots.vertical ? (
+              <span className="text-sm font-extrabold text-emerald-800 capitalize flex items-center gap-1">
+                <Check className="w-3.5 h-3.5 text-emerald-600" /> {slots.vertical}
               </span>
             ) : (
-              <span className="text-amber-600 flex items-center space-x-1">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> <span>Slot Filling ({Object.keys(slots).length}/3)</span>
+              <span className="text-xs font-medium text-slate-400">Awaiting input (e.g. Clinic)</span>
+            )}
+          </div>
+        </div>
+
+        {/* HEADCOUNT */}
+        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1">
+              <Users className="w-3 h-3 text-slate-400" /> Headcount
+            </span>
+            {slots.headcount && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
+          </div>
+          <div className="mt-1">
+            {slots.headcount ? (
+              <span className="text-sm font-extrabold text-emerald-800 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5 text-emerald-600" /> {slots.headcount} members
+              </span>
+            ) : (
+              <span className="text-xs font-medium text-slate-400">Awaiting input (e.g. 8 staff)</span>
+            )}
+          </div>
+        </div>
+
+        {/* BRANCHES */}
+        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1">
+              <MapPin className="w-3 h-3 text-slate-400" /> Branches
+            </span>
+            {slots.locations && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
+          </div>
+          <div className="mt-1">
+            {slots.locations ? (
+              <span className="text-sm font-extrabold text-emerald-800 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5 text-emerald-600" /> {slots.locations} site(s)
+              </span>
+            ) : (
+              <span className="text-xs font-medium text-slate-400">Awaiting input (e.g. 1 site)</span>
+            )}
+          </div>
+        </div>
+
+        {/* STATUS */}
+        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Advisor Status</span>
+          </div>
+          <div className="text-xs font-extrabold mt-1">
+            {loading ? (
+              <span className="text-amber-600 flex items-center space-x-1.5">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                <span>Analyzing Turn...</span>
+              </span>
+            ) : generatedQuote ? (
+              <span className="text-emerald-600 flex items-center space-x-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>Quote Ready!</span>
+              </span>
+            ) : capturedSlotsCount > 0 ? (
+              <span className="text-blue-600 flex items-center space-x-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                <span>Slot-Filling ({capturedSlotsCount}/3)</span>
+              </span>
+            ) : (
+              <span className="text-slate-600 flex items-center space-x-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Ready for Input (0/3)</span>
               </span>
             )}
-          </p>
+          </div>
         </div>
+      </div>
+
+      {/* Prominent 1-Click Fast-Track Presets Bar (Positioned ABOVE the chat so user is never stuck) */}
+      <div className="bg-gradient-to-r from-red-50 via-slate-50 to-amber-50 p-4 rounded-2xl border border-red-100 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-red-600 text-white text-[10px] font-black">
+                ⚡
+              </span>
+              <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                1-Click Fast-Track Presets
+              </h3>
+              <span className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">
+                Zero Typing Needed
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 mt-0.5">
+              Select any pre-configured enterprise scenario to trigger the advisor instantly, or click Instant Recommend.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleInstantRecommend({ vertical: "prof", headcount: 8, locations: 1 })}
+              disabled={loading}
+              className="px-3.5 py-1.5 bg-[#E40000] text-white rounded-xl text-xs font-extrabold hover:bg-red-700 transition-all shadow-sm flex items-center space-x-1.5 shrink-0 disabled:opacity-50"
+            >
+              <span>⚡ Instant Recommend (8 Staff)</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* 4 Interactive Profile Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+          {quickPrompts.map((qp, idx) => (
+            <button
+              key={idx}
+              onClick={() => handleSend(qp.text)}
+              disabled={loading}
+              className="p-3 bg-white border border-slate-200 rounded-xl hover:border-red-500 hover:shadow-md transition-all text-left group flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-base">{qp.icon}</span>
+                  <span className="text-xs font-bold text-slate-800 group-hover:text-red-600">
+                    {qp.title}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">{qp.meta}</p>
+              </div>
+              <div className="mt-2 text-[10px] text-red-600 font-bold flex items-center gap-1 opacity-80 group-hover:opacity-100">
+                <span>Select profile</span>
+                <ChevronRight className="w-3 h-3" />
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Logged-in Customer Badge */}
+        {user?.businessName && (
+          <div className="mt-3 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Active Persona:</span>
+              <strong className="text-slate-800">{user.name}</strong>
+              <span className="text-slate-400">({user.businessName})</span>
+            </div>
+            <button
+              onClick={() =>
+                handleSend(
+                  `We are ${user.businessName} located in ${user.city}. Team of 8 employees, single location. Need high speed fiber and postpaid SIMs.`
+                )
+              }
+              className="text-red-600 font-bold underline hover:text-red-700"
+            >
+              Auto-fill for {user.businessName} →
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Container: WhatsApp Business Simulator OR Web Chat */}
       {mode === "whatsapp" ? (
         /* Authentic WhatsApp Business Simulator Container */
-        <div className="max-w-2xl mx-auto bg-[#e5ddd5] rounded-3xl shadow-xl overflow-hidden border border-gray-300">
+        <div className="max-w-2xl mx-auto bg-[#e5ddd5] rounded-3xl shadow-xl overflow-hidden border border-slate-300">
           
           {/* WhatsApp Header */}
           <div className="bg-[#075e54] text-white px-4 py-3 flex items-center justify-between shadow">
@@ -256,14 +454,14 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
                 <div
                   className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs shadow-sm relative leading-relaxed ${
                     m.role === "user"
-                      ? "bg-[#dcf8c6] text-gray-900 rounded-tr-none"
-                      : "bg-white text-gray-900 rounded-tl-none border border-gray-100"
+                      ? "bg-[#dcf8c6] text-slate-900 rounded-tr-none font-medium"
+                      : "bg-white text-slate-900 rounded-tl-none border border-slate-100"
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{m.content}</p>
                   
                   {m.role === "assistant" && (
-                    <div className="flex items-center justify-between mt-2 pt-1 border-t border-gray-100 text-[10px] text-gray-400">
+                    <div className="flex items-center justify-between mt-2 pt-1 border-t border-slate-100 text-[10px] text-slate-400">
                       <span>SYNC Advisor</span>
                       <button
                         onClick={() => speakText(m.content)}
@@ -280,7 +478,7 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-white rounded-2xl px-4 py-2 text-xs text-gray-500 shadow-sm flex items-center space-x-2">
+                <div className="bg-white rounded-2xl px-4 py-2 text-xs text-slate-500 shadow-sm flex items-center space-x-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
                   <span>Airtel Advisor is typing...</span>
                 </div>
@@ -308,12 +506,12 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             </div>
           )}
 
-          {/* Input Box */}
-          <div className="bg-[#f0f0f0] p-3 flex items-center space-x-2 border-t border-gray-200">
+          {/* WhatsApp Interactive Input Bar */}
+          <div className="bg-[#f0f0f0] p-3 flex items-center space-x-2 border-t border-slate-200">
             <button
               onClick={toggleListening}
               className={`p-2.5 rounded-full transition-all ${
-                isListening ? "bg-red-600 text-white animate-pulse" : "bg-white text-gray-600 hover:text-emerald-700 shadow-sm"
+                isListening ? "bg-red-600 text-white animate-pulse" : "bg-white text-slate-600 hover:text-emerald-700 shadow-sm"
               }`}
               title="Speak in Hindi / English via Web Speech API"
             >
@@ -325,8 +523,8 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder={isListening ? "Listening... Speak in Hindi or English" : "Type business details or use mic..."}
-              className="flex-1 bg-white text-xs px-4 py-2.5 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-800"
+              placeholder={isListening ? "Listening... Speak in Hindi or English" : "Type business details or choose a preset above..."}
+              className="flex-1 bg-white text-xs px-4 py-2.5 rounded-full border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800"
             />
 
             <button
@@ -341,19 +539,19 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
         </div>
       ) : (
         /* Modern Web Chat View */
-        <div className="bg-white rounded-3xl border border-gray-200 shadow-lg overflow-hidden max-w-3xl mx-auto">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-lg overflow-hidden max-w-3xl mx-auto">
           <div className="bg-gradient-to-r from-red-600 to-rose-600 px-6 py-4 text-white flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Sparkles className="w-5 h-5 text-yellow-300" />
               <div>
                 <h3 className="font-bold text-sm">Airtel SYNC GenAI Bundle Advisor</h3>
-                <p className="text-[11px] text-red-100">Slot-Filling in English, Hindi, & Hinglish</p>
+                <p className="text-[11px] text-red-100">Slot-Filling in English, Hindi, &amp; Hinglish</p>
               </div>
             </div>
             <span className="px-2 py-0.5 text-xs bg-white/20 rounded-full font-medium">Turn-based discovery</span>
           </div>
 
-          <div className="p-6 space-y-4 min-h-[360px] max-h-[460px] overflow-y-auto bg-gray-50">
+          <div className="p-6 space-y-4 min-h-[360px] max-h-[460px] overflow-y-auto bg-slate-50">
             {messages.map((m, idx) => (
               <div
                 key={idx}
@@ -363,15 +561,15 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
                   className={`max-w-[80%] rounded-2xl p-4 text-xs shadow-sm leading-relaxed ${
                     m.role === "user"
                       ? "bg-red-600 text-white rounded-tr-none font-medium"
-                      : "bg-white text-gray-900 rounded-tl-none border border-gray-200"
+                      : "bg-white text-slate-900 rounded-tl-none border border-slate-200"
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{m.content}</p>
                   {m.role === "assistant" && (
-                    <div className="flex justify-end mt-2 pt-1 border-t border-gray-100">
+                    <div className="flex justify-end mt-2 pt-1 border-t border-slate-100">
                       <button
                         onClick={() => speakText(m.content)}
-                        className="text-[11px] text-gray-400 hover:text-red-600 flex items-center space-x-1"
+                        className="text-[11px] text-slate-400 hover:text-red-600 flex items-center space-x-1"
                       >
                         <Volume2 className="w-3.5 h-3.5" />
                         <span>Voice Readout</span>
@@ -403,11 +601,11 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             </div>
           )}
 
-          <div className="p-4 bg-white border-t border-gray-200 flex items-center space-x-2">
+          <div className="p-4 bg-white border-t border-slate-200 flex items-center space-x-2">
             <button
               onClick={toggleListening}
               className={`p-2.5 rounded-xl border ${
-                isListening ? "bg-red-600 text-white animate-pulse" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                isListening ? "bg-red-600 text-white animate-pulse" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
               title="Voice Input (Hindi/English)"
             >
@@ -419,8 +617,8 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Describe your business, headcount, branches, and pain points..."
-              className="flex-1 px-4 py-2.5 text-xs bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
+              placeholder="Describe your business, headcount, branches, and priorities..."
+              className="flex-1 px-4 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500"
             />
 
             <button
@@ -434,27 +632,9 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
         </div>
       )}
 
-      {/* Quick Prompts Chips */}
-      <div className="max-w-2xl mx-auto space-y-2">
-        <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">
-          One-Click Test Scenarios:
-        </span>
-        <div className="flex flex-wrap gap-2">
-          {quickPrompts.map((qp, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSend(qp.text)}
-              className="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 text-xs rounded-xl hover:border-red-500 hover:text-red-600 transition-all shadow-sm font-medium"
-            >
-              {qp.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Quote Ready Alert Banner */}
       {generatedQuote && (
-        <div className="max-w-2xl mx-auto bg-gradient-to-r from-emerald-500 to-teal-600 p-5 rounded-2xl text-white shadow-lg flex items-center justify-between">
+        <div className="max-w-2xl mx-auto bg-gradient-to-r from-emerald-500 to-teal-600 p-5 rounded-2xl text-white shadow-lg flex items-center justify-between animate-fadeIn">
           <div>
             <div className="flex items-center space-x-2">
               <CheckCircle2 className="w-5 h-5 text-white" />
@@ -469,7 +649,7 @@ export default function Step1Discovery({ onQuoteGenerated }: Step1DiscoveryProps
             onClick={() => onQuoteGenerated(generatedQuote, slots)}
             className="px-4 py-2 bg-white text-emerald-800 font-extrabold text-xs rounded-xl hover:bg-emerald-50 transition-all shadow flex items-center space-x-1.5"
           >
-            <span>View Quote & Bill</span>
+            <span>Proceed to Step 2: Quote Configurator</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
